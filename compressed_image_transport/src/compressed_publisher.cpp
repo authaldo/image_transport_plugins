@@ -52,6 +52,7 @@ enum compressedParameters
   FORMAT = 0,
   PNG_LEVEL,
   JPEG_QUALITY,
+  JPEG_COMPRESS_BAYER,
   TIFF_RESOLUTION_UNIT,
   TIFF_XDPI,
   TIFF_YDPI
@@ -93,6 +94,14 @@ const struct ParameterDefinition kParameters[] =
         .set__from_value(1)
         .set__to_value(100)
         .set__step(1)})
+  },
+  { //JPEG_COMPRESS_BAYER - allow compression of bayer encoded images.
+    ParameterValue((bool)false),
+    ParameterDescriptor()
+      .set__name("jpeg_compress_bayer")
+      .set__type(rcl_interfaces::msg::ParameterType::PARAMETER_BOOL)
+      .set__description("Allow JPEG compression for bayer format")
+      .set__read_only(false)
   },
   {  // TIFF_RESOLUTION_UNIT - TIFF resolution unit, can be one of "none", "inch", "centimeter".
     ParameterValue("inch"),
@@ -155,6 +164,7 @@ void CompressedPublisher::publish(
   // Fresh Configuration
   std::string cfg_format = node_->get_parameter(parameters_[FORMAT]).get_value<std::string>();
   int cfg_png_level = node_->get_parameter(parameters_[PNG_LEVEL]).get_value<int64_t>();
+  bool cfg_jpeg_compress_bayer = node_->get_parameter(parameters_[JPEG_COMPRESS_BAYER]).get_value<bool>();
   int cfg_jpeg_quality = node_->get_parameter(parameters_[JPEG_QUALITY]).get_value<int64_t>();
   std::string cfg_tiff_res_unit =
     node_->get_parameter(parameters_[TIFF_RESOLUTION_UNIT]).get_value<std::string>();
@@ -200,6 +210,9 @@ void CompressedPublisher::publish(
           if (enc::isColor(message.encoding)) {
             // convert color images to BGR8 format
             targetFormat = "bgr8";
+            compressed.format += targetFormat;
+          } else if (enc::isBayer(message.encoding) and cfg_jpeg_compress_bayer) {
+            targetFormat = message.encoding;
             compressed.format += targetFormat;
           } else {
             // convert gray images to mono8 format
