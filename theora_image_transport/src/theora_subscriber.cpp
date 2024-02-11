@@ -93,28 +93,29 @@ TheoraSubscriber::~TheoraSubscriber()
 }
 
 void TheoraSubscriber::subscribeImpl(
-  rclcpp::Node * node,
+  image_transport::NodeInterfaces::SharedPtr node_interfaces,
   const std::string &base_topic,
   const Callback & callback,
   rmw_qos_profile_t custom_qos,
   rclcpp::SubscriptionOptions options)
 {
-  node_ = node;
-  logger_ = node->get_logger();
+  node_interfaces_ = node_interfaces;
+  logger_ = node_interfaces_->logging->get_logger();
 
   typedef image_transport::SimpleSubscriberPlugin<theora_image_transport::msg::Packet> Base;
-  Base::subscribeImpl(node, base_topic, callback, custom_qos, options);
+  Base::subscribeImpl(node_interfaces_, base_topic, callback, custom_qos, options);
 
   // Declare Parameters
-  uint ns_len = node->get_effective_namespace().length();
+  // TODO: original implementation uses get_effective_namespace of rclcpp::Node
+  uint ns_len = strlen(node_interfaces_->base->get_namespace());
   std::string param_base_name = base_topic.substr(ns_len);
   std::replace(param_base_name.begin(), param_base_name.end(), '/', '.');
 
   using paramCallbackT = std::function<void(ParameterEvent::SharedPtr event)>;
   auto paramCallback = std::bind(&TheoraSubscriber::onParameterEvent, this, std::placeholders::_1,
-                                 node->get_fully_qualified_name(), param_base_name);
+                                 node_interfaces_->base->get_fully_qualified_name(), param_base_name);
 
-  parameter_subscription_ = rclcpp::SyncParametersClient::on_parameter_event<paramCallbackT>(node, paramCallback);
+  parameter_subscription_ = rclcpp::SyncParametersClient::on_parameter_event<paramCallbackT>(node_interfaces_->topics, paramCallback);
 
   for(const ParameterDefinition &pd : kParameters)
     declareParameter(param_base_name, pd);
@@ -122,12 +123,12 @@ void TheoraSubscriber::subscribeImpl(
 
 void TheoraSubscriber::refreshConfig()
 {
-  int cfg_pplevel = node_->get_parameter(parameters_[POST_PROCESSING_LEVEL]).get_value<int>();
+  int cfg_pplevel = node_interfaces_->parameters->get_parameter(parameters_[POST_PROCESSING_LEVEL]).get_value<int>();
 
   if (decoding_context_ && pplevel_ != cfg_pplevel) {
     pplevel_ = updatePostProcessingLevel(cfg_pplevel);
     // In case more than PPLEVEL_MAX
-    node_->set_parameter(rclcpp::Parameter(parameters_[POST_PROCESSING_LEVEL], pplevel_));
+    node_interfaces_->parameters->set_parameters({rclcpp::Parameter(parameters_[POST_PROCESSING_LEVEL], pplevel_)});
   }
   else
     pplevel_ = cfg_pplevel;
@@ -306,18 +307,18 @@ void TheoraSubscriber::declareParameter(const std::string &base_name,
   rclcpp::ParameterValue param_value;
 
   try {
-    param_value = node_->declare_parameter(param_name, definition.defaultValue, definition.descriptor);
+    param_value = node_interfaces_->parameters->declare_parameter(param_name, definition.defaultValue, definition.descriptor);
   } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException &) {
     RCLCPP_DEBUG(logger_, "%s was previously declared", definition.descriptor.name.c_str());
-    param_value = node_->get_parameter(param_name).get_parameter_value();
+    param_value = node_interfaces_->parameters->get_parameter(param_name).get_parameter_value();
   }
 
   // transport scoped parameter as default, otherwise we would overwrite
   try {
-    node_->declare_parameter(deprecated_name, param_value, definition.descriptor);
+    node_interfaces_->parameters->declare_parameter(deprecated_name, param_value, definition.descriptor);
   } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException &) {
     RCLCPP_DEBUG(logger_, "%s was previously declared", definition.descriptor.name.c_str());
-    node_->get_parameter(deprecated_name).get_parameter_value();
+    node_interfaces_->parameters->get_parameter(deprecated_name).get_parameter_value();
   }
 }
 
@@ -344,7 +345,7 @@ void TheoraSubscriber::onParameterEvent(ParameterEvent::SharedPtr event, std::st
     //e.g. `color.image_raw.` + `theora` + `post_processing_level`
     std::string recommendedName = name.substr(0, paramNameIndex + 1) + transport + name.substr(paramNameIndex);
 
-    rclcpp::Parameter recommendedValue = node_->get_parameter(recommendedName);
+    rclcpp::Parameter recommendedValue = node_interfaces_->parameters->get_parameter(recommendedName);
 
     // do not emit warnings if deprecated value matches
     if(it.second->value == recommendedValue.get_value_message())
@@ -353,7 +354,7 @@ void TheoraSubscriber::onParameterEvent(ParameterEvent::SharedPtr event, std::st
     RCLCPP_WARN_STREAM(logger_, "parameter `" << name << "` is deprecated" <<
                                 "; use transport qualified name `" << recommendedName << "`");
 
-    node_->set_parameter(rclcpp::Parameter(recommendedName, it.second->value));
+    node_interfaces_->parameters->set_parameters({rclcpp::Parameter(recommendedName, it.second->value)});
   }
 }
 

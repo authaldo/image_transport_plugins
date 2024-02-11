@@ -34,11 +34,10 @@
 
 #include "theora_image_transport/compression_common.h"
 
-#include <rclcpp/node.hpp>
-
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 
+#include <image_transport/node_interfaces.hpp>
 #include <image_transport/simple_publisher_plugin.hpp>
 #include <cv_bridge/cv_bridge.hpp>
 #include <std_msgs/msg/header.hpp>
@@ -66,7 +65,7 @@ public:
 
 protected:
   void advertiseImpl(
-    rclcpp::Node* node,
+    image_transport::NodeInterfaces::SharedPtr node_interfaces,
     const std::string &base_topic,
     rmw_qos_profile_t custom_qos,
     rclcpp::PublisherOptions options) override;
@@ -98,7 +97,7 @@ protected:
   mutable std::vector<theora_image_transport::msg::Packet> stream_header_;
 
   rclcpp::Logger logger_;
-  rclcpp::Node * node_;
+  image_transport::NodeInterfaces::SharedPtr node_interfaces_;
 
 private:
   std::vector<std::string> parameters_;
