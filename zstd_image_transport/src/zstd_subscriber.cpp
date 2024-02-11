@@ -58,16 +58,16 @@ std::string ZstdSubscriber::getTransportName() const
 }
 
 void ZstdSubscriber::subscribeImpl(
-  rclcpp::Node * node,
+  image_transport::NodeInterfaces::SharedPtr node_interfaces,
   const std::string & base_topic,
   const Callback & callback,
   rmw_qos_profile_t custom_qos,
   rclcpp::SubscriptionOptions options)
 {
-  node_ = node;
-  logger_ = node->get_logger();
+  node_interfaces_ = node_interfaces;
+  logger_ = node_interfaces_->logging->get_logger();
   typedef image_transport::SimpleSubscriberPlugin<sensor_msgs::msg::CompressedImage> Base;
-  Base::subscribeImpl(node, base_topic, callback, custom_qos, options);
+  Base::subscribeImpl(node_interfaces_, base_topic, callback, custom_qos, options);
 }
 
 void ZstdSubscriber::internalCallback(

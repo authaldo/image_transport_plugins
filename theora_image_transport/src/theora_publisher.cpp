@@ -144,27 +144,28 @@ TheoraPublisher::~TheoraPublisher()
 }
 
 void TheoraPublisher::advertiseImpl(
-  rclcpp::Node *node,
+  image_transport::NodeInterfaces::SharedPtr node_interfaces,
   const std::string &base_topic,
   rmw_qos_profile_t custom_qos,
   rclcpp::PublisherOptions options)
 {
-  node_ = node;
-  logger_ = node->get_logger();
+  node_interfaces_ = node_interfaces;
+  logger_ = node_interfaces_->logging->get_logger();
 
   typedef image_transport::SimplePublisherPlugin<theora_image_transport::msg::Packet> Base;
-  Base::advertiseImpl(node, base_topic, custom_qos, options);
+  Base::advertiseImpl(node_interfaces_, base_topic, custom_qos, options);
 
   // Declare Parameters
-  uint ns_len = node->get_effective_namespace().length();
+  // TODO: original implementation uses get_effective_namespace of rclcpp::Node
+  uint ns_len = strlen(node_interfaces_->base->get_namespace());
   std::string param_base_name = base_topic.substr(ns_len);
   std::replace(param_base_name.begin(), param_base_name.end(), '/', '.');
 
   using callbackT = std::function<void(ParameterEvent::SharedPtr event)>;
   auto callback = std::bind(&TheoraPublisher::onParameterEvent, this, std::placeholders::_1,
-                            node->get_fully_qualified_name(), param_base_name);
+                            node_interfaces_->base->get_fully_qualified_name(), param_base_name);
 
-  parameter_subscription_ = rclcpp::SyncParametersClient::on_parameter_event<callbackT>(node, callback);
+  parameter_subscription_ = rclcpp::SyncParametersClient::on_parameter_event<callbackT>(node_interfaces_->topics, callback);
 
   for(const ParameterDefinition &pd : kParameters)
     declareParameter(param_base_name, pd);
@@ -279,10 +280,10 @@ void TheoraPublisher::refreshConfig() const
   refreshConfigNeeded = false;
 
   // Fresh Configuration
-  optimizeForTarget cfg_optimize_for = (optimizeForTarget)node_->get_parameter(parameters_[OPTIMIZE_FOR]).get_value<bool>();
-  int cfg_bitrate = node_->get_parameter(parameters_[TARGET_BITRATE]).get_value<int>();
-  int cfg_quality = node_->get_parameter(parameters_[QUALITY]).get_value<int>();
-  int cfg_keyframe_frequency = node_->get_parameter(parameters_[KEYFRAME_FREQUENCY]).get_value<int>();
+  optimizeForTarget cfg_optimize_for = (optimizeForTarget)node_interfaces_->parameters->get_parameter(parameters_[OPTIMIZE_FOR]).get_value<bool>();
+  int cfg_bitrate = node_interfaces_->parameters->get_parameter(parameters_[TARGET_BITRATE]).get_value<int>();
+  int cfg_quality = node_interfaces_->parameters->get_parameter(parameters_[QUALITY]).get_value<int>();
+  int cfg_keyframe_frequency = node_interfaces_->parameters->get_parameter(parameters_[KEYFRAME_FREQUENCY]).get_value<int>();
 
   long bitrate = 0;
   if (cfg_optimize_for == OPTIMIZE_BITRATE)
@@ -327,7 +328,7 @@ void TheoraPublisher::refreshConfig() const
     else {
       updateKeyframeFrequency();
       if(cfg_keyframe_frequency != (int)keyframe_frequency_) // In case desired value was unattainable
-        node_->set_parameter(rclcpp::Parameter(parameters_[KEYFRAME_FREQUENCY], (int)keyframe_frequency_));
+        node_interfaces_->parameters->set_parameters({rclcpp::Parameter(parameters_[KEYFRAME_FREQUENCY], (int)keyframe_frequency_)});
     }
   }
 }
@@ -418,18 +419,18 @@ void TheoraPublisher::declareParameter(const std::string &base_name,
   rclcpp::ParameterValue param_value;
 
   try {
-    param_value = node_->declare_parameter(param_name, definition.defaultValue, definition.descriptor);
+    param_value = node_interfaces_->parameters->declare_parameter(param_name, definition.defaultValue, definition.descriptor);
   } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException &) {
     RCLCPP_DEBUG(logger_, "%s was previously declared", definition.descriptor.name.c_str());
-    param_value = node_->get_parameter(param_name).get_parameter_value();
+    param_value = node_interfaces_->parameters->get_parameter(param_name).get_parameter_value();
   }
 
   // transport scoped parameter as default, otherwise we would overwrite
   try {
-    node_->declare_parameter(deprecated_name, param_value, definition.descriptor);
+    node_interfaces_->parameters->declare_parameter(deprecated_name, param_value, definition.descriptor);
   } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException &) {
     RCLCPP_DEBUG(logger_, "%s was previously declared", definition.descriptor.name.c_str());
-    node_->get_parameter(deprecated_name).get_parameter_value();
+    node_interfaces_->parameters->get_parameter(deprecated_name).get_parameter_value();
   }
 }
 
@@ -456,7 +457,7 @@ void TheoraPublisher::onParameterEvent(ParameterEvent::SharedPtr event, std::str
     //e.g. `color.image_raw.` + `theora` + `quality`
     std::string recommendedName = name.substr(0, paramNameIndex + 1) + transport + name.substr(paramNameIndex);
 
-    rclcpp::Parameter recommendedValue = node_->get_parameter(recommendedName);
+    rclcpp::Parameter recommendedValue = node_interfaces_->parameters->get_parameter(recommendedName);
 
     // do not emit warnings if deprecated value matches
     if(it.second->value == recommendedValue.get_value_message())
@@ -465,7 +466,7 @@ void TheoraPublisher::onParameterEvent(ParameterEvent::SharedPtr event, std::str
     RCLCPP_WARN_STREAM(logger_, "parameter `" << name << "` is deprecated" <<
                                 "; use transport qualified name `" << recommendedName << "`");
 
-    node_->set_parameter(rclcpp::Parameter(recommendedName, it.second->value));
+    node_interfaces_->parameters->set_parameters({rclcpp::Parameter(recommendedName, it.second->value)});
   }
 
   //if any of the non-deprecated parameters changed mark to refresh config

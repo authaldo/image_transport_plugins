@@ -34,8 +34,7 @@
 
 #include "theora_image_transport/compression_common.h"
 
-#include <rclcpp/node.hpp>
-
+#include <image_transport/node_interfaces.hpp>
 #include <image_transport/simple_subscriber_plugin.hpp>
 #include <theora_image_transport/msg/packet.hpp>
 
@@ -61,7 +60,7 @@ public:
 protected:
   // Overridden to bump queue_size, otherwise we might lose headers
   void subscribeImpl(
-    rclcpp::Node* node,
+    image_transport::NodeInterfaces::SharedPtr node_interfaces,
     const std::string &base_topic,
     const Callback & callback,
     rmw_qos_profile_t custom_qos,
@@ -89,7 +88,7 @@ protected:
   sensor_msgs::msg::Image::SharedPtr latest_image_;
 
   rclcpp::Logger logger_;
-  rclcpp::Node * node_;
+  image_transport::NodeInterfaces::SharedPtr node_interfaces_;
 
 private:
   std::vector<std::string> parameters_;
