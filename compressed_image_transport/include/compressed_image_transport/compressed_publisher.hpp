@@ -38,6 +38,7 @@
 #include <image_transport/simple_publisher_plugin.hpp>
 
 #include <rclcpp/node.hpp>
+#include <rclcpp/parameter_client.hpp>
 
 #include "compressed_image_transport/compression_common.hpp"
 
@@ -64,7 +65,7 @@ public:
 protected:
   // Overridden to set up reconfigure server
   void advertiseImpl(
-    rclcpp::Node * node,
+    image_transport::RequiredInterfaces node_interfaces,
     const std::string & base_topic,
     rmw_qos_profile_t custom_qos,
     rclcpp::PublisherOptions options) override;
@@ -74,13 +75,14 @@ protected:
     const PublishFn & publish_fn) const override;
 
   rclcpp::Logger logger_;
-  rclcpp::Node * node_;
+  image_transport::RequiredInterfaces node_interfaces_;
 
 private:
   std::vector<std::string> parameters_;
   std::vector<std::string> deprecatedParameters_;
 
   rclcpp::Subscription<ParameterEvent>::SharedPtr parameter_subscription_;
+  rclcpp::SyncParametersClient::SharedPtr sync_parameters_client_;
 
   void declareParameter(
     const std::string & base_name,

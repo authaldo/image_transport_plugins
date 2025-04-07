@@ -34,6 +34,7 @@
 #include <vector>
 
 #include <rclcpp/node.hpp>
+#include <rclcpp/parameter_client.hpp>
 #include <rclcpp/subscription_options.hpp>
 
 #include <sensor_msgs/msg/image.hpp>
@@ -64,7 +65,7 @@ public:
 
 protected:
   void subscribeImpl(
-    rclcpp::Node *,
+    image_transport::RequiredInterfaces node_interfaces,
     const std::string & base_topic,
     const Callback & callback,
     rmw_qos_profile_t custom_qos,
@@ -75,13 +76,14 @@ protected:
     const Callback & user_cb) override;
 
   rclcpp::Logger logger_;
-  rclcpp::Node * node_;
+  image_transport::RequiredInterfaces node_interfaces_;
 
 private:
   std::vector<std::string> parameters_;
   std::vector<std::string> deprecatedParameters_;
 
   rclcpp::Subscription<ParameterEvent>::SharedPtr parameter_subscription_;
+  rclcpp::SyncParametersClient::SharedPtr sync_parameters_client_;
 
   int imdecodeFlagFromConfig();
 

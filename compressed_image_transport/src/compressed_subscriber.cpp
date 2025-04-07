@@ -37,7 +37,6 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
-#include <rclcpp/parameter_client.hpp>
 #include <rclcpp/parameter_events_filter.hpp>
 
 #include "compressed_image_transport/compression_common.hpp"
@@ -68,28 +67,37 @@ const struct ParameterDefinition kParameters[] =
 };
 
 void CompressedSubscriber::subscribeImpl(
-  rclcpp::Node * node,
+  image_transport::RequiredInterfaces node_interfaces,
   const std::string & base_topic,
   const Callback & callback,
   rmw_qos_profile_t custom_qos,
   rclcpp::SubscriptionOptions options)
 {
-  node_ = node;
-  logger_ = node->get_logger();
+  node_interfaces_ = std::move(node_interfaces);
+  logger_ = node_interfaces_.get_node_logging_interface()->get_logger();
   typedef image_transport::SimpleSubscriberPlugin<CompressedImage> Base;
-  Base::subscribeImpl(node, base_topic, callback, custom_qos, options);
+  Base::subscribeImpl(node_interfaces_, base_topic, callback, custom_qos, options);
+
+  sync_parameters_client_ = std::make_shared<rclcpp::SyncParametersClient>(
+          std::make_shared<rclcpp::executors::SingleThreadedExecutor>(),
+          node_interfaces_.get_node_base_interface(),
+          node_interfaces_.get_node_topics_interface(),
+          node_interfaces_.get_node_graph_interface(),
+          node_interfaces_.get_node_services_interface());
 
   // Declare Parameters
-  uint ns_len = node->get_effective_namespace().length();
+  uint ns_len = strlen(node_interfaces_.get_node_base_interface()->get_namespace());
   std::string param_base_name = base_topic.substr(ns_len);
   std::replace(param_base_name.begin(), param_base_name.end(), '/', '.');
 
   using paramCallbackT = std::function<void(ParameterEvent::SharedPtr event)>;
+  const auto & fully_qualified_name =
+    node_interfaces_.get_node_base_interface()->get_fully_qualified_name();
   auto paramCallback = std::bind(&CompressedSubscriber::onParameterEvent, this,
-      std::placeholders::_1, node->get_fully_qualified_name(), param_base_name);
+      std::placeholders::_1, fully_qualified_name, param_base_name);
 
-  parameter_subscription_ = rclcpp::SyncParametersClient::on_parameter_event<paramCallbackT>(node,
-      paramCallback);
+  parameter_subscription_ =
+    sync_parameters_client_->on_parameter_event<paramCallbackT>(paramCallback);
 
   for(const ParameterDefinition & pd : kParameters) {
     declareParameter(param_base_name, pd);
@@ -186,7 +194,8 @@ void CompressedSubscriber::internalCallback(
 
 int CompressedSubscriber::imdecodeFlagFromConfig()
 {
-  std::string mode = node_->get_parameter(parameters_[MODE]).get_value<std::string>();
+  std::string mode =
+    node_interfaces_.get_node_parameters_interface()->get_parameter(parameters_[MODE]).get_value<std::string>();
 
   if (mode == "unchanged") {
     return cv::IMREAD_UNCHANGED;
@@ -216,18 +225,19 @@ void CompressedSubscriber::declareParameter(
   deprecatedParameters_.push_back(deprecated_name);
 
   rclcpp::ParameterValue param_value;
+  const auto & param_interface = node_interfaces_.get<rclcpp::node_interfaces::NodeParametersInterface>();
 
   try {
-    param_value = node_->declare_parameter(param_name, definition.defaultValue,
+    param_value = param_interface->declare_parameter(param_name, definition.defaultValue,
         definition.descriptor);
   } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException &) {
     RCLCPP_DEBUG(logger_, "%s was previously declared", definition.descriptor.name.c_str());
-    param_value = node_->get_parameter(param_name).get_parameter_value();
+    param_value = param_interface->get_parameter(param_name).get_parameter_value();
   }
 
   // transport scoped parameter as default, otherwise we would overwrite
   try {
-    node_->declare_parameter(deprecated_name, param_value, definition.descriptor);
+    param_interface->declare_parameter(deprecated_name, param_value, definition.descriptor);
   } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException &) {
     RCLCPP_DEBUG(logger_, "%s was previously declared", definition.descriptor.name.c_str());
   }
@@ -261,7 +271,8 @@ void CompressedSubscriber::onParameterEvent(
     std::string recommendedName = name.substr(0,
         paramNameIndex + 1) + transport + name.substr(paramNameIndex);
 
-    rclcpp::Parameter recommendedValue = node_->get_parameter(recommendedName);
+    const auto & param_interface = node_interfaces_.get<rclcpp::node_interfaces::NodeParametersInterface>();
+    rclcpp::Parameter recommendedValue = param_interface->get_parameter(recommendedName);
 
     // do not emit warnings if deprecated value matches
     if(it.second->value == recommendedValue.get_value_message()) {
@@ -271,7 +282,7 @@ void CompressedSubscriber::onParameterEvent(
     RCLCPP_WARN_STREAM(logger_, "parameter `" << name << "` is deprecated and ambiguous" <<
                                 "; use transport qualified name `" << recommendedName << "`");
 
-    node_->set_parameter(rclcpp::Parameter(recommendedName, it.second->value));
+    param_interface->set_parameters({rclcpp::Parameter(recommendedName, it.second->value)});
   }
 }
 
